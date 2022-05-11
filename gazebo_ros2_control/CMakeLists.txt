@@ -3,6 +3,7 @@ project(gazebo_ros2_control)
 
 find_package(ament_cmake REQUIRED)
 find_package(angles REQUIRED)
+find_package(control_toolbox REQUIRED)
 find_package(controller_manager REQUIRED)
 find_package(gazebo_dev REQUIRED)
 find_package(gazebo_ros REQUIRED)
@@ -44,6 +45,7 @@ add_library(gazebo_hardware_plugins SHARED
 )
 ament_target_dependencies(gazebo_hardware_plugins
   angles
+  control_toolbox
   gazebo_dev
   hardware_interface
   rclcpp

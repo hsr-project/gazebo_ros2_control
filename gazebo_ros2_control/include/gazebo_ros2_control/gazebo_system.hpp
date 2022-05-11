@@ -24,6 +24,8 @@
 
 #include "gazebo_ros2_control/gazebo_system_interface.hpp"
 
+#include "rcl_interfaces/msg/set_parameters_result.hpp"
+
 #include "std_msgs/msg/bool.hpp"
 
 namespace gazebo_ros2_control
@@ -82,8 +84,10 @@ private:
 
   /// \brief Private data class
   std::unique_ptr<GazeboSystemPrivate> dataPtr;
-};
 
+  rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr callback_handle_;
+  rcl_interfaces::msg::SetParametersResult parametersCallback(const std::vector<rclcpp::Parameter>& parameters);
+};
 }  // namespace gazebo_ros2_control
 
 #endif  // GAZEBO_ROS2_CONTROL__GAZEBO_SYSTEM_HPP_
