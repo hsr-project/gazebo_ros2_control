@@ -75,10 +75,11 @@ public:
   // Methods used to control a joint.
   enum ControlMethod_
   {
-    NONE      = 0,
-    POSITION  = (1 << 0),
-    VELOCITY  = (1 << 1),
-    EFFORT    = (1 << 2),
+    NONE         = 0,
+    POSITION     = (1 << 0),
+    VELOCITY     = (1 << 1),
+    EFFORT       = (1 << 2),
+    POSITION_PID = (1 << 3),
   };
 
   typedef SafeEnum<enum ControlMethod_> ControlMethod;
