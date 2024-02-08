@@ -19,6 +19,8 @@
 #include <vector>
 #include <utility>
 
+#include <control_toolbox/pid.hpp>
+
 #include "gazebo_ros2_control/gazebo_system.hpp"
 #include "gazebo/sensors/ImuSensor.hh"
 #include "gazebo/sensors/ForceTorqueSensor.hh"
@@ -103,7 +105,48 @@ public:
 
   /// \brief mapping of mimicked joints to index of joint they mimic
   std::vector<MimicJoint> mimic_joints_;
+
+  /// \brief pid controllers
+  std::vector<control_toolbox::Pid> pid_controllers_;
 };
+
+bool ExtractGainParameter(const hardware_interface::ComponentInfo& info,
+                          const std::string& name,
+                          double& parameter_out) {
+  const auto it = info.parameters.find(name);
+  if (it != info.parameters.cend()) {
+    parameter_out = std::stod(it->second);
+    if (parameter_out >= 0.0) {
+      return true;
+    } else {
+      return false;
+    }
+  } else {
+    return false;
+  }
+}
+
+bool DeclarePIDControl(const rclcpp::Node::SharedPtr& node,
+                       const hardware_interface::ComponentInfo& info,
+                       control_toolbox::Pid& pid_out) {
+  auto gain = pid_out.getGains();
+  double i_max;
+  auto has_pid_gains =
+      (ExtractGainParameter(info, "p_gain", gain.p_gain_) && ExtractGainParameter(info, "i_gain", gain.i_gain_) &&
+       ExtractGainParameter(info, "d_gain", gain.d_gain_) && ExtractGainParameter(info, "i_max", i_max));
+  if (!has_pid_gains) {
+    return false;
+  }
+
+  node->declare_parameter<double>(info.name + ".p", gain.p_gain_);
+  node->declare_parameter<double>(info.name + ".i", gain.i_gain_);
+  node->declare_parameter<double>(info.name + ".d", gain.d_gain_);
+
+  gain.i_max_ = i_max;
+  gain.i_min_ = -i_max;
+  pid_out.setGains(gain);
+  return true;
+}
 
 namespace gazebo_ros2_control
 {
@@ -151,9 +194,10 @@ void GazeboSystem::registerJoints(
   this->dataPtr->joint_position_.resize(this->dataPtr->n_dof_);
   this->dataPtr->joint_velocity_.resize(this->dataPtr->n_dof_);
   this->dataPtr->joint_effort_.resize(this->dataPtr->n_dof_);
-  this->dataPtr->joint_position_cmd_.resize(this->dataPtr->n_dof_);
-  this->dataPtr->joint_velocity_cmd_.resize(this->dataPtr->n_dof_);
-  this->dataPtr->joint_effort_cmd_.resize(this->dataPtr->n_dof_);
+  this->dataPtr->joint_position_cmd_.resize(this->dataPtr->n_dof_, 0.0);
+  this->dataPtr->joint_velocity_cmd_.resize(this->dataPtr->n_dof_, 0.0);
+  this->dataPtr->joint_effort_cmd_.resize(this->dataPtr->n_dof_, 0.0);
+  this->dataPtr->pid_controllers_.resize(this->dataPtr->n_dof_);
 
   for (unsigned int j = 0; j < this->dataPtr->n_dof_; j++) {
     auto & joint_info = hardware_info.joints[j];
@@ -249,13 +293,18 @@ void GazeboSystem::registerJoints(
         this->dataPtr->joint_effort_[j] = initial_effort;
       }
     }
-
     RCLCPP_INFO_STREAM(this->nh_->get_logger(), "\tCommand:");
 
     // register the command handles
     for (unsigned int i = 0; i < joint_info.command_interfaces.size(); i++) {
       if (joint_info.command_interfaces[i].name == "position") {
-        RCLCPP_INFO_STREAM(this->nh_->get_logger(), "\t\t position");
+        if (DeclarePIDControl(this->nh_, hardware_info.joints[j], this->dataPtr->pid_controllers_[j])) {
+          RCLCPP_INFO_STREAM(this->nh_->get_logger(), "\t\t position pid");
+          this->dataPtr->joint_control_methods_[j] |= POSITION_PID;
+        } else {
+          RCLCPP_INFO_STREAM(this->nh_->get_logger(), "\t\t position");
+          this->dataPtr->joint_control_methods_[j] |= POSITION;
+        }
         this->dataPtr->command_interfaces_.emplace_back(
           joint_name + suffix,
           hardware_interface::HW_IF_POSITION,
@@ -301,6 +350,8 @@ void GazeboSystem::registerJoints(
     // check if joint is actuated (has command interfaces) or passive
     this->dataPtr->is_joint_actuated_[j] = (joint_info.command_interfaces.size() > 0);
   }
+  this->callback_handle_ = this->nh_->add_on_set_parameters_callback(
+      std::bind(&GazeboSystem::parametersCallback, this, std::placeholders::_1));
 }
 
 void GazeboSystem::registerSensors(
@@ -592,18 +643,22 @@ hardware_interface::return_type GazeboSystem::write(
     }
   }
 
+  uint64_t dt = sim_period.nanoseconds();
   for (unsigned int j = 0; j < this->dataPtr->joint_names_.size(); j++) {
     if (this->dataPtr->sim_joints_[j]) {
+      if (this->dataPtr->joint_control_methods_[j] & POSITION_PID) {
+        double error = angles::shortest_angular_distance(this->dataPtr->joint_position_[j],
+                                                         this->dataPtr->joint_position_cmd_[j]);
+        // TODO(Takeshita) effort limit
+        double effort = this->dataPtr->pid_controllers_[j].computeCommand(error, dt);
+        this->dataPtr->sim_joints_[j]->SetForce(0, effort);
+      }
       if (this->dataPtr->joint_control_methods_[j] & POSITION) {
         this->dataPtr->sim_joints_[j]->SetPosition(0, this->dataPtr->joint_position_cmd_[j], true);
-        this->dataPtr->sim_joints_[j]->SetVelocity(0, 0.0);
       } else if (this->dataPtr->joint_control_methods_[j] & VELOCITY) { // NOLINT
         this->dataPtr->sim_joints_[j]->SetVelocity(0, this->dataPtr->joint_velocity_cmd_[j]);
       } else if (this->dataPtr->joint_control_methods_[j] & EFFORT) { // NOLINT
         this->dataPtr->sim_joints_[j]->SetForce(0, this->dataPtr->joint_effort_cmd_[j]);
-      } else if (this->dataPtr->is_joint_actuated_[j]) {
-        // Fallback case is a velocity command of zero (only for actuated joints)
-        this->dataPtr->sim_joints_[j]->SetVelocity(0, 0.0);
       }
     }
   }
@@ -612,6 +667,32 @@ hardware_interface::return_type GazeboSystem::write(
 
   return hardware_interface::return_type::OK;
 }
+
+rcl_interfaces::msg::SetParametersResult GazeboSystem::parametersCallback(const std::vector<rclcpp::Parameter>& parameters) {
+  for (const auto parameter : parameters) {
+    for (uint32_t i = 0; i < dataPtr->joint_names_.size(); ++i) {
+      if (parameter.get_name().find(dataPtr->joint_names_[i]) != 0) {
+        continue;
+      }
+      auto gain = dataPtr->pid_controllers_[i].getGains();
+      if (parameter.get_name().back() == 'p') {
+        gain.p_gain_ = parameter.as_double();
+      } else if (parameter.get_name().back() == 'i') {
+        gain.i_gain_ = parameter.as_double();
+      } else if (parameter.get_name().back() == 'd') {
+        gain.d_gain_ = parameter.as_double();
+      }
+      RCLCPP_INFO_STREAM(this->nh_->get_logger(), dataPtr->joint_names_[i]
+                         << ": " << "P = " << gain.p_gain_ << ", I = " << gain.i_gain_ << ", D = " << gain.d_gain_);
+      dataPtr->pid_controllers_[i].setGains(gain);
+    }
+  }
+  rcl_interfaces::msg::SetParametersResult result;
+  result.successful = true;
+  result.reason = "success";
+  return result;
+}
+
 }  // namespace gazebo_ros2_control
 
 #include "pluginlib/class_list_macros.hpp"  // NOLINT
