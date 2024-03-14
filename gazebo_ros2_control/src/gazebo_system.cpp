@@ -284,7 +284,13 @@ void GazeboSystem::registerJoints(
     for (unsigned int i = 0; i < joint_info.command_interfaces.size(); i++) {
       if (joint_info.command_interfaces[i].name == "position") {
         RCLCPP_INFO_STREAM(this->nh_->get_logger(), "\t\t position");
-        this->dataPtr->joint_control_methods_[j] |= POSITION;
+        if (DeclarePIDControl(this->nh_, hardware_info.joints[j], this->dataPtr->pid_controllers_[j])) {
+          RCLCPP_INFO_STREAM(this->nh_->get_logger(), "\t\t position pid");
+          this->dataPtr->joint_control_methods_[j] |= POSITION_PID;
+        } else {
+          RCLCPP_INFO_STREAM(this->nh_->get_logger(), "\t\t position");
+          this->dataPtr->joint_control_methods_[j] |= POSITION;
+        }
         this->dataPtr->command_interfaces_.emplace_back(
           joint_name + suffix, hardware_interface::HW_IF_POSITION,
           &this->dataPtr->joint_position_cmd_[j]);
