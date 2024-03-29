@@ -283,7 +283,6 @@ void GazeboSystem::registerJoints(
     // register the command handles
     for (unsigned int i = 0; i < joint_info.command_interfaces.size(); i++) {
       if (joint_info.command_interfaces[i].name == "position") {
-        RCLCPP_INFO_STREAM(this->nh_->get_logger(), "\t\t position");
         if (DeclarePIDControl(this->nh_, hardware_info.joints[j], this->dataPtr->pid_controllers_[j])) {
           RCLCPP_INFO_STREAM(this->nh_->get_logger(), "\t\t position pid");
           this->dataPtr->joint_control_methods_[j] |= POSITION_PID;
@@ -638,8 +637,7 @@ hardware_interface::return_type GazeboSystem::write()
         // TODO(Takeshita) effort limit
         double effort = this->dataPtr->pid_controllers_[j].computeCommand(error, dt);
         this->dataPtr->sim_joints_[j]->SetForce(0, effort);
-      }
-      if (this->dataPtr->joint_control_methods_[j] & POSITION) {
+      } else if (this->dataPtr->joint_control_methods_[j] & POSITION) {
         this->dataPtr->sim_joints_[j]->SetPosition(
           0, this->dataPtr->joint_position_cmd_[j], true);
       }
