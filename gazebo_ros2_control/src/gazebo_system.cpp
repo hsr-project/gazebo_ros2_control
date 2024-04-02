@@ -663,8 +663,7 @@ hardware_interface::return_type GazeboSystem::write(
         // TODO(Takeshita) effort limit
         double effort = this->dataPtr->pid_controllers_[j].computeCommand(error, dt);
         this->dataPtr->sim_joints_[j]->SetForce(0, effort);
-      }
-      if (this->dataPtr->joint_control_methods_[j] & POSITION) {
+      } else if (this->dataPtr->joint_control_methods_[j] & POSITION) {
         this->dataPtr->sim_joints_[j]->SetPosition(0, this->dataPtr->joint_position_cmd_[j], true);
       } else if (this->dataPtr->joint_control_methods_[j] & VELOCITY) { // NOLINT
         this->dataPtr->sim_joints_[j]->SetVelocity(0, this->dataPtr->joint_velocity_cmd_[j]);
