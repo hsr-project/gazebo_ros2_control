@@ -329,7 +329,13 @@ void GazeboSystem::registerJoints(
         this->dataPtr->sim_joints_[j]->SetPosition(0, initial_position, true);
       }
       if (joint_info.command_interfaces[i].name == "velocity") {
-        RCLCPP_INFO_STREAM(this->nh_->get_logger(), "\t\t velocity");
+        if (DeclarePIDControl(this->nh_, hardware_info.joints[j], this->dataPtr->pid_controllers_[j])) {
+          RCLCPP_INFO_STREAM(this->nh_->get_logger(), "\t\t velocity pid");
+          this->dataPtr->joint_control_methods_[j] |= VELOCITY_PID;
+        } else {
+          RCLCPP_INFO_STREAM(this->nh_->get_logger(), "\t\t velocity");
+          this->dataPtr->joint_control_methods_[j] |= VELOCITY;
+        }
         this->dataPtr->command_interfaces_.emplace_back(
           joint_name + suffix,
           hardware_interface::HW_IF_VELOCITY,
@@ -658,13 +664,18 @@ hardware_interface::return_type GazeboSystem::write(
   for (unsigned int j = 0; j < this->dataPtr->joint_names_.size(); j++) {
     if (this->dataPtr->sim_joints_[j]) {
       if (this->dataPtr->joint_control_methods_[j] & POSITION_PID) {
-        double error = angles::shortest_angular_distance(this->dataPtr->joint_position_[j],
-                                                         this->dataPtr->joint_position_cmd_[j]);
+        const double error = angles::shortest_angular_distance(this->dataPtr->joint_position_[j],
+                                                               this->dataPtr->joint_position_cmd_[j]);
         // TODO(Takeshita) effort limit
-        double effort = this->dataPtr->pid_controllers_[j].computeCommand(error, dt);
+        const double effort = this->dataPtr->pid_controllers_[j].computeCommand(error, dt);
         this->dataPtr->sim_joints_[j]->SetForce(0, effort);
       } else if (this->dataPtr->joint_control_methods_[j] & POSITION) {
         this->dataPtr->sim_joints_[j]->SetPosition(0, this->dataPtr->joint_position_cmd_[j], true);
+      } else if (this->dataPtr->joint_control_methods_[j] & VELOCITY_PID) {
+        const double error = this->dataPtr->joint_velocity_cmd_[j] - this->dataPtr->joint_velocity_[j];
+        // TODO(Takeshita) effort limit
+        const double effort = this->dataPtr->pid_controllers_[j].computeCommand(error, dt);
+        this->dataPtr->sim_joints_[j]->SetForce(0, effort);
       } else if (this->dataPtr->joint_control_methods_[j] & VELOCITY) { // NOLINT
         this->dataPtr->sim_joints_[j]->SetVelocity(0, this->dataPtr->joint_velocity_cmd_[j]);
       } else if (this->dataPtr->joint_control_methods_[j] & EFFORT) { // NOLINT
@@ -679,7 +690,7 @@ hardware_interface::return_type GazeboSystem::write(
 }
 
 rcl_interfaces::msg::SetParametersResult GazeboSystem::parametersCallback(const std::vector<rclcpp::Parameter>& parameters) {
-  for (const auto parameter : parameters) {
+  for (const auto& parameter : parameters) {
     for (uint32_t i = 0; i < dataPtr->joint_names_.size(); ++i) {
       if (parameter.get_name().find(dataPtr->joint_names_[i]) != 0) {
         continue;
