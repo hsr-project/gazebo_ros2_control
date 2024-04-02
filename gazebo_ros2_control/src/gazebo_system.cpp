@@ -283,15 +283,25 @@ void GazeboSystem::registerJoints(
     // register the command handles
     for (unsigned int i = 0; i < joint_info.command_interfaces.size(); i++) {
       if (joint_info.command_interfaces[i].name == "position") {
-        RCLCPP_INFO_STREAM(this->nh_->get_logger(), "\t\t position");
-        this->dataPtr->joint_control_methods_[j] |= POSITION;
+        if (DeclarePIDControl(this->nh_, hardware_info.joints[j], this->dataPtr->pid_controllers_[j])) {
+          RCLCPP_INFO_STREAM(this->nh_->get_logger(), "\t\t position pid");
+          this->dataPtr->joint_control_methods_[j] |= POSITION_PID;
+        } else {
+          RCLCPP_INFO_STREAM(this->nh_->get_logger(), "\t\t position");
+          this->dataPtr->joint_control_methods_[j] |= POSITION;
+        }
         this->dataPtr->command_interfaces_.emplace_back(
           joint_name + suffix, hardware_interface::HW_IF_POSITION,
           &this->dataPtr->joint_position_cmd_[j]);
       }
       if (joint_info.command_interfaces[i].name == "velocity") {
-        RCLCPP_INFO_STREAM(this->nh_->get_logger(), "\t\t velocity");
-        this->dataPtr->joint_control_methods_[j] |= VELOCITY;
+        if (DeclarePIDControl(this->nh_, hardware_info.joints[j], this->dataPtr->pid_controllers_[j])) {
+          RCLCPP_INFO_STREAM(this->nh_->get_logger(), "\t\t velocity pid");
+          this->dataPtr->joint_control_methods_[j] |= VELOCITY_PID;
+        } else {
+          RCLCPP_INFO_STREAM(this->nh_->get_logger(), "\t\t velocity");
+          this->dataPtr->joint_control_methods_[j] |= VELOCITY;
+        }
         this->dataPtr->command_interfaces_.emplace_back(
           joint_name + suffix, hardware_interface::HW_IF_VELOCITY,
           &this->dataPtr->joint_velocity_cmd_[j]);
@@ -632,12 +642,16 @@ hardware_interface::return_type GazeboSystem::write()
         // TODO(Takeshita) effort limit
         double effort = this->dataPtr->pid_controllers_[j].computeCommand(error, dt);
         this->dataPtr->sim_joints_[j]->SetForce(0, effort);
-      }
-      if (this->dataPtr->joint_control_methods_[j] & POSITION) {
+      } else if (this->dataPtr->joint_control_methods_[j] & POSITION) {
         this->dataPtr->sim_joints_[j]->SetPosition(
           0, this->dataPtr->joint_position_cmd_[j], true);
       }
-      if (this->dataPtr->joint_control_methods_[j] & VELOCITY) {
+      if (this->dataPtr->joint_control_methods_[j] & VELOCITY_PID) {
+        double error = this->dataPtr->joint_velocity_cmd_[j] - this->dataPtr->joint_velocity_[j];
+        // TODO(Takeshita) effort limit
+        double effort = this->dataPtr->pid_controllers_[j].computeCommand(error, dt);
+        this->dataPtr->sim_joints_[j]->SetForce(0, effort);
+      } else if (this->dataPtr->joint_control_methods_[j] & VELOCITY) {
         this->dataPtr->sim_joints_[j]->SetVelocity(
           0, this->dataPtr->joint_velocity_cmd_[j]);
       }
