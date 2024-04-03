@@ -415,8 +415,9 @@ void GazeboRosControlPrivate::Update()
   rclcpp::Time sim_time_ros(gz_time_now.sec, gz_time_now.nsec, RCL_ROS_TIME);
   rclcpp::Duration sim_period = sim_time_ros - last_update_sim_time_ros_;
 
+  controller_manager_->read(sim_time_ros, sim_period);
+
   if (sim_period >= control_period_) {
-    controller_manager_->read(sim_time_ros, sim_period);
     controller_manager_->update(sim_time_ros, sim_period);
     last_update_sim_time_ros_ = sim_time_ros;
   }

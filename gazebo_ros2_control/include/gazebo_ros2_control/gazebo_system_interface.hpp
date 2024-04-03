@@ -80,6 +80,7 @@ public:
     VELOCITY     = (1 << 1),
     EFFORT       = (1 << 2),
     POSITION_PID = (1 << 3),
+    VELOCITY_PID = (1 << 4),
   };
 
   typedef SafeEnum<enum ControlMethod_> ControlMethod;
