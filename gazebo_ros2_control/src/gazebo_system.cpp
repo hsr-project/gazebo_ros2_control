@@ -34,6 +34,7 @@ struct MimicJoint
   std::size_t joint_index;
   std::size_t mimicked_joint_index;
   double multiplier = 1.0;
+  double offset = 1.0;
 };
 
 class gazebo_ros2_control::GazeboSystemPrivate
@@ -233,18 +234,18 @@ void GazeboSystem::registerJoints(
       mimic_joint.joint_index = j;
       mimic_joint.mimicked_joint_index = std::distance(
         hardware_info.joints.begin(), mimicked_joint_it);
-      auto param_it = joint_info.parameters.find("multiplier");
-      if (param_it != joint_info.parameters.end()) {
+      if (joint_info.parameters.find("multiplier") != joint_info.parameters.end()) {
         mimic_joint.multiplier = std::stod(joint_info.parameters.at("multiplier"));
-      } else {
-        mimic_joint.multiplier = 1.0;
+      }
+      if (joint_info.parameters.find("offset") != joint_info.parameters.end()) {
+        mimic_joint.offset = std::stod(joint_info.parameters.at("offset"));
       }
       RCLCPP_INFO_STREAM(
         this->nh_->get_logger(),
         "Joint '" << joint_name << "'is mimicking joint '" << mimicked_joint <<
-          "' with mutiplier: " << mimic_joint.multiplier);
+          "' with mutiplier: " << mimic_joint.multiplier << " and offset: " << mimic_joint.offset);
       this->dataPtr->mimic_joints_.push_back(mimic_joint);
-      suffix = "_mimic";
+      // suffix = "_mimic";
     }
 
     RCLCPP_INFO_STREAM(this->nh_->get_logger(), "\tState:");
@@ -579,12 +580,6 @@ GazeboSystem::perform_command_mode_switch(
       }
     }
   }
-
-  // mimic joint has the same control mode as mimicked joint
-  for (const auto & mimic_joint : this->dataPtr->mimic_joints_) {
-    this->dataPtr->joint_control_methods_[mimic_joint.joint_index] =
-      this->dataPtr->joint_control_methods_[mimic_joint.mimicked_joint_index];
-  }
   return hardware_interface::return_type::OK;
 }
 
@@ -640,21 +635,19 @@ hardware_interface::return_type GazeboSystem::write(
 
   // set values of all mimic joints with respect to mimicked joint
   for (const auto & mimic_joint : this->dataPtr->mimic_joints_) {
-    if (this->dataPtr->joint_control_methods_[mimic_joint.joint_index] & POSITION &&
-      this->dataPtr->joint_control_methods_[mimic_joint.mimicked_joint_index] & POSITION)
-    {
+    auto method_mimic = this->dataPtr->joint_control_methods_[mimic_joint.joint_index];
+    auto method_mimicked = this->dataPtr->joint_control_methods_[mimic_joint.mimicked_joint_index];
+    if ((method_mimic & POSITION || method_mimic & POSITION_PID) ||
+        (method_mimicked & POSITION_PID || method_mimicked & POSITION) ||
+        (method_mimicked & POSITION_PID || method_mimicked & POSITION_PID)) {
       this->dataPtr->joint_position_cmd_[mimic_joint.joint_index] =
-        mimic_joint.multiplier *
-        this->dataPtr->joint_position_cmd_[mimic_joint.mimicked_joint_index];
-    } else if (this->dataPtr->joint_control_methods_[mimic_joint.joint_index] & VELOCITY && // NOLINT
-      this->dataPtr->joint_control_methods_[mimic_joint.mimicked_joint_index] & VELOCITY)
-    {
+        mimic_joint.multiplier * this->dataPtr->joint_position_cmd_[mimic_joint.mimicked_joint_index] +
+        mimic_joint.offset;
+    } else if (method_mimic & VELOCITY && method_mimicked & VELOCITY) {
       this->dataPtr->joint_velocity_cmd_[mimic_joint.joint_index] =
         mimic_joint.multiplier *
         this->dataPtr->joint_velocity_cmd_[mimic_joint.mimicked_joint_index];
-    } else if (this->dataPtr->joint_control_methods_[mimic_joint.joint_index] & EFFORT && // NOLINT
-      this->dataPtr->joint_control_methods_[mimic_joint.mimicked_joint_index] & EFFORT)
-    {
+    } else if (method_mimic & EFFORT && method_mimicked & EFFORT) {
       this->dataPtr->joint_effort_cmd_[mimic_joint.joint_index] =
         mimic_joint.multiplier * this->dataPtr->joint_effort_cmd_[mimic_joint.mimicked_joint_index];
     }
